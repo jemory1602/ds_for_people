@@ -1,0 +1,144 @@
+---
+title: "HW2"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+
+library(tidyverse)
+library(skimr)
+library(ggforce)
+library(caret) # Tools and common interface to many supervised learning algorithms
+library(patchwork) # For combining multiple plots
+library(plotROC)
+library(pROC)
+
+set.seed(888) # To ensure consistent results from non-deterministic procedures
+rm(list = ls()) # Removes all variables
+
+compas.df = read_csv("https://raw.githubusercontent.com/propublica/compas-analysis/master/compas-scores.csv")
+skim(compas.df)
+
+
+```
+##z 3. Read and select data 
+```{r}
+
+# removing columns  that contain many missing variables , below 90%
+compas_removed.df = compas.df %>% select(-vr_case_number,-vr_charge_degree,-vr_charge_desc,-r_case_number,-c_arrest_date,-c_offense_date,-r_offense_date,-r_jail_in,-r_jail_out,-vr_offense_date,-r_days_from_arrest,-r_charge_desc ) 
+
+compas_removed_na.df= compas_removed.df %>% filter(!is.na(c_case_number))%>% filter(!is.na(c_charge_desc))%>%filter(!is.na(days_b_screening_arrest))%>%filter(!is.na(c_days_from_compas))#,c_charge_desc,days_b_screening_arrest,c_days_from_compas))
+
+
+
+
+
+```
+##  4. Partition the data into training and test sets
+
+```{r}
+
+
+compas_removed_na.df = compas_removed_na.df %>% mutate(recid = if_else(is_recid == 1, "yes", "no")) %>% 
+  mutate(recid = as.factor(recid))
+
+
+```
+
+
+```{r}
+
+# feature and target selectiom 
+
+compas_removed_na.df = compas_removed_na.df%>%select(juv_fel_count,priors_count,age,, recid)
+
+
+
+```
+
+```{r}
+
+compas_removed_na.df
+
+```
+
+
+```{r}
+## Creates a random sample of rows for training
+inTrain = createDataPartition(compas_removed_na.df$recid, p = 0.75, list = FALSE) 
+
+## Create dataframes of descriptive variables for training and testing
+# Slice extracts rows based on vector of row numbers
+trainDescr = compas_removed_na.df %>% slice(inTrain) %>% select(-recid)
+testDescr = compas_removed_na.df %>% slice(-inTrain) %>% select(-recid)
+
+trainClass = compas_removed_na.df %>% slice(inTrain) %>% select(recid) %>% as.matrix() %>% as.factor()
+testClass = compas_removed_na.df %>% slice(-inTrain) %>% select(recid) %>% as.matrix() %>% as.factor()
+
+## Proportion of good and bad cases should be the same in testing and training
+# Ideally the classes should be balanced
+compas_removed_na.df %>% select(recid) %>%  table() %>% prop.table() %>% round(3)*100 
+
+trainClass %>% table() %>% prop.table() %>% round(3)*100
+
+testClass %>% table() %>% prop.table() %>% round(3)*100 
+
+
+```
+
+
+
+
+```{r}
+
+## Trans.mod is a transformation model that is trained and the applied to the data
+Trans.mod = preProcess(trainDescr, method = c("center", "scale")) 
+trainScaled = predict(Trans.mod, trainDescr)
+testScaled = predict(Trans.mod, testDescr)
+
+ggplot(trainDescr, aes(x = juv_fel_count)) + 
+  geom_histogram(aes(y = ..density..), fill = "white") +
+  geom_density() + 
+  ggplot(trainScaled, aes(x = juv_fel_count)) + 
+  geom_histogram(aes(y = ..density..), fill = "white") +
+  geom_density()
+
+```
+
+
+```{r}
+
+
+
+
+
+
+
+
+train.control = trainControl(method = "repeatedcv", 
+                             number = 10, repeats = 3, # number: number of folds
+                             search = "grid", # for tuning hyperparameters
+                             classProbs = TRUE, # return probability of prediction
+                             savePredictions = "final",
+                             summaryFunction = twoClassSummary
+                             )
+
+
+```
+
+```{r train_glm, cache = TRUE, echo=TRUE, warning=FALSE}
+
+glm.fit = train(x = trainScaled, y = trainClass,
+   method = 'glm', metric = "ROC",
+   trControl = train.control) 
+
+glm.fit
+
+```
+
